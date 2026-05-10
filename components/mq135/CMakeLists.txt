@@ -1,6 +1,6 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "mq135.c"
     INCLUDE_DIRS "."
-    REQUIRES mq135 dht22
+    REQUIRES esp_adc
     PRIV_REQUIRES log
 )
