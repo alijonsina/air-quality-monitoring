@@ -5,6 +5,8 @@
 #include "mq135.h"
 #include "dht22.h"
 #include "mqtt_manager.h"
+#include <time.h>
+#include "esp_sntp.h"
 
 static const char *TAG = "AQM";
 #define NODE_ID 1
@@ -25,12 +27,6 @@ void app_main(void) {
         return;
     }
 
-    ret = mqtt_publish(NODE_ID, 0, 0, 0);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failure to publish via MQTT: %s\n", esp_err_to_name(ret));
-    }
-
-
     ret = dht22_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failure to initialize DHT22: %s", esp_err_to_name(ret));
@@ -41,6 +37,17 @@ void app_main(void) {
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failure to initialize MQ135: %s", esp_err_to_name(ret));
         return;
+    }
+
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+
+    int retry = 0;
+    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && retry < 10) {
+        ESP_LOGI(TAG, "Waiting for NTP sync...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        retry++;
     }
 
     while(1) {
@@ -59,11 +66,15 @@ void app_main(void) {
             continue;
         } 
 
-        ESP_LOGI(TAG, "PPM = %f, Temperature = %f, Humidity = %f \n", ppm, temperature, humidity);
+        time_t now;
+        time(&now);
+
+        ESP_LOGI(TAG, "Timestamp = %lld, PPM = %f, Temperature = %f, Humidity = %f \n", (int64_t)now, ppm, temperature, humidity);
         
-        ret = mqtt_publish(NODE_ID, ppm, temperature, humidity);
+        ret = mqtt_publish(NODE_ID, (int64_t)now, ppm, temperature, humidity);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failure to publish via MQTT: %s\n", esp_err_to_name(ret));
+            vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
             continue;
         }
 

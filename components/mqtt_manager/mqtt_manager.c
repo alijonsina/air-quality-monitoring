@@ -69,7 +69,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     }
 }
 
-esp_err_t mqtt_publish(int node_id, float ppm, float temperature, float humidity) {
+esp_err_t mqtt_publish(int node_id, int64_t timestamp, float ppm, float temperature, float humidity) {
     if (!mqtt_connected) {
         ESP_LOGW(TAG, "MQTT not connected, dropping reading");
         return ESP_FAIL;
@@ -79,7 +79,7 @@ esp_err_t mqtt_publish(int node_id, float ppm, float temperature, float humidity
     char topic[64];
 
     snprintf(topic, sizeof(topic), "airquality/node%d/sensors", node_id);
-    snprintf(payload, sizeof(payload), "{\"node\":%d,\"ppm\":%.2f,\"temperature\":%.2f,\"humidity\":%.2f}", node_id, ppm, temperature, humidity);
+    snprintf(payload, sizeof(payload), "{\"node\":%d,\"timestamp\":%lld,\"ppm\":%.2f,\"temperature\":%.2f,\"humidity\":%.2f}", node_id, timestamp, ppm, temperature, humidity);
 
     int msg_id = esp_mqtt_client_publish(mqtt_client, topic, payload, 0, 1, 0);
     if (msg_id < 0) {
