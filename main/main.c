@@ -7,13 +7,19 @@
 #include "mqtt_manager.h"
 #include <time.h>
 #include "esp_sntp.h"
+#include "config_manager.h"
+#include "esp_ota_ops.h"
+
 
 static const char *TAG = "AQM";
 #define NODE_ID 1
 #define SENSOR_READ_DELAY 2000
 
 void app_main(void) {
-    ESP_LOGI(TAG, "Starting the app:\n");
+    esp_ota_mark_app_valid_cancel_rollback();
+    
+    ESP_LOGI(TAG, "Firmware version 2.0 - OTA test");
+    ESP_LOGI(TAG, "Starting the app:");
     ESP_LOGI(TAG, "Starting Wifi Manager:\n");
     esp_err_t ret = wifi_manager_init();
     if (ret != ESP_OK) {
@@ -21,7 +27,13 @@ void app_main(void) {
         return;
     }
 
-    ret = mqtt_init();
+    ret = config_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failure to initialize CONFIG Manager: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = mqtt_init(return_node_id());
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failure to initialize MQTT Manager: %s", esp_err_to_name(ret));
         return;
@@ -71,7 +83,7 @@ void app_main(void) {
 
         ESP_LOGI(TAG, "Timestamp = %lld, PPM = %f, Temperature = %f, Humidity = %f \n", (int64_t)now, ppm, temperature, humidity);
         
-        ret = mqtt_publish(NODE_ID, (int64_t)now, ppm, temperature, humidity);
+        ret = mqtt_publish((int64_t)now, ppm, temperature, humidity);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failure to publish via MQTT: %s\n", esp_err_to_name(ret));
             vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
