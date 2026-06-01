@@ -13,7 +13,9 @@
 
 static const char *TAG = "AQM";
 #define NODE_ID 1
-#define SENSOR_READ_DELAY 2000
+#define SENSOR_READ_DELAY_MIN 2000
+#define SENSOR_READ_DELAY 10000
+#define SENSOR_READ_DELAY_MAX 300000
 
 void app_main(void) {
     esp_ota_mark_app_valid_cancel_rollback();
@@ -67,14 +69,14 @@ void app_main(void) {
         ret = dht22_read_value(&humidity, &temperature);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failure to read DHT22: %s\n", esp_err_to_name(ret));
-            vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
+            vTaskDelay(pdMS_TO_TICKS(config_get_read_interval()));
             continue;
         }   
         
         ret = mq135_read_ppm(temperature, humidity, &ppm);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failure to read MQ135: %s\n", esp_err_to_name(ret));
-            vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
+            vTaskDelay(pdMS_TO_TICKS(config_get_read_interval()));
             continue;
         } 
 
@@ -86,10 +88,10 @@ void app_main(void) {
         ret = mqtt_publish((int64_t)now, ppm, temperature, humidity);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failure to publish via MQTT: %s\n", esp_err_to_name(ret));
-            vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
+            vTaskDelay(pdMS_TO_TICKS(config_get_read_interval()));
             continue;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(SENSOR_READ_DELAY));
+        vTaskDelay(pdMS_TO_TICKS(config_get_read_interval()));
     }
 }

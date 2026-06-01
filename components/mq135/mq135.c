@@ -5,6 +5,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "config_manager.h"
 #include <math.h>
 
 #define CORA 0.00035f
@@ -115,7 +116,7 @@ esp_err_t mq135_read_ppm(float temperature, float humidity, float *ppm) {
 
     float corrected_sensor_resistance = sensor_resistance / get_correction_factor(temperature, humidity);
 
-    *ppm = MQ135_PARA * powf(corrected_sensor_resistance / RZERO, -MQ135_PARB);
+    *ppm = MQ135_PARA * powf(corrected_sensor_resistance / config_get_rzero(), -MQ135_PARB);
     
     return ESP_OK;
 }

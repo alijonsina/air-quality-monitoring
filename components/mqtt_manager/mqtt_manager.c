@@ -135,6 +135,30 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 }
                 break;
             }
+
+            char expected_config[64];
+            snprintf(expected_config, sizeof(expected_config), "airquality/node%d/config", mqtt_node_id);
+            if (strcmp(topic, expected_config) == 0) {
+                float rzero = 0;
+                int interval = 0;
+                if (sscanf(data, "{\"rzero\":%f}", &rzero) == 1) {
+                    config_set_rzero(rzero);
+                    ESP_LOGI(TAG, "RZERO updated to %.2f", rzero);
+                    mqtt_publish_update_status("config_updated");
+                } else if (sscanf(data, "{\"read_interval\":%d}", &interval) == 1) {
+                    if (interval >= 2000 && interval <= 300000) {
+                        config_set_read_interval(interval);
+                        ESP_LOGI(TAG, "Read interval updated to %dms", interval);
+                        mqtt_publish_update_status("config_updated");
+                    } else {
+                        ESP_LOGW(TAG, "Read interval %dms out of bounds", interval);
+                        mqtt_publish_update_status("config_rejected");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "Unknown config: %s", data);
+                }
+                break;
+            }
             break;
         }
         default:
