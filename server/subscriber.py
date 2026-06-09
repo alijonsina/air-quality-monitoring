@@ -72,13 +72,14 @@ def on_message(client, userdata, message):
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("""
                 INSERT INTO airquality_table 
-                (node_id, ppm, temperature, humidity, timestamp)
-                VALUES (?, ?, ?, ?, ?)""", 
-                (data["node"], data["ppm"], data["temperature"], data["humidity"], data["timestamp"]))
+                (node_id, ppm, temperature, humidity, timestamp, received_at)
+                VALUES (?, ?, ?, ?, ?, ?)""", 
+                (data["node"], data["ppm"], data["temperature"], data["humidity"],
+                 data["timestamp"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             conn.commit()
             log.info(f"Node {data['node']} | PPM: {data['ppm']} | "
                      f"Temp: {data['temperature']}°C | "
-                     f"Humidity: {data['humidity']}%")
+                     f"Humidity: {data['humidity']}%")    
     except sqlite3.Error as e:
         log.error(f"Database error: {e}")
 

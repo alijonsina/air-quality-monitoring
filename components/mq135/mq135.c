@@ -66,11 +66,19 @@ esp_err_t mq135_init(void) {
 }
 
 static esp_err_t mq135_read_raw(int *raw) {
-    esp_err_t ret =adc_oneshot_read(adc_handle, MQ135_ADC_CHANNEL, raw);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ADC read failed: %s\n", esp_err_to_name(ret));
-        return ret;
+    int sum     = 0;
+    int samples = 64;
+
+    for (int i = 0; i < samples; i++) {
+        int sample = 0;
+        esp_err_t ret = adc_oneshot_read(adc_handle, MQ135_ADC_CHANNEL, &sample);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "ADC read failed at sample %d: %s", i, esp_err_to_name(ret));
+            return ret;
+        }
+        sum += sample;
     }
+    *raw = sum / samples;
     return ESP_OK;
 }
 
