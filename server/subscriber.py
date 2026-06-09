@@ -8,7 +8,7 @@ from datetime import datetime
 BROKER_HOST = "localhost"
 BROKER_PORT = 1883
 TOPIC       = "airquality/#"
-DB_PATH     = "database/airquality.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database", "airquality.db")
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<a href="/" class="back-link">← Back to overview</a>
+
+<div class="node-detail-header">
+    <h1 class="node-detail-title">Node {{ node_id }}</h1>
+    <span id="node-status" class="status-badge online">Online</span>
+</div>
+
+<div class="aq-level-bar" id="aq-live" style="background:#f0f1f3; color:#9ca3af; max-width:480px; margin-bottom:0.75rem;">
+    <span class="aq-dot" style="background:#9ca3af"></span>Loading...
+</div>
+
+<div class="readings-grid" style="max-width: 480px; margin-bottom: 1rem;">
+    <div class="reading-item ppm">
+        <div class="reading-value" id="live-ppm">—</div>
+        <div class="reading-label">PPM</div>
+    </div>
+    <div class="reading-item temp">
+        <div class="reading-value" id="live-temp">—</div>
+        <div class="reading-label">Temp °C</div>
+    </div>
+    <div class="reading-item hum">
+        <div class="reading-value" id="live-hum">—</div>
+        <div class="reading-label">Humidity</div>
+    </div>
+</div>
+<p class="last-reading-text" id="last-reading-p"></p>
+
+<hr class="section-divider">
+
+<div class="section-header">
+    <span class="section-title">Historical Data</span>
+</div>
+
+<div class="time-selector">
+    <span class="time-selector-label">Range</span>
+    <button onclick="loadHistory(1)"   id="btn-1h">1h</button>
+    <button onclick="loadHistory(6)"   id="btn-6h">6h</button>
+    <button onclick="loadHistory(24)"  id="btn-24h" class="active">24h</button>
+    <button onclick="loadHistory(168)" id="btn-7d">7d</button>
+    <input type="datetime-local" id="custom-start">
+    <input type="datetime-local" id="custom-end">
+    <button onclick="loadHistoryCustom()" class="primary">Apply</button>
+</div>
+<p class="chart-hint">Scroll to zoom · Click and drag to pan</p>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">CO₂ (PPM)</span>
+        <button class="btn-sm" onclick="ppmChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="ppm-chart"></canvas></div>
+    </div>
+</div>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">Temperature (°C)</span>
+        <button class="btn-sm" onclick="tempChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="temp-chart"></canvas></div>
+    </div>
+</div>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">Humidity (%)</span>
+        <button class="btn-sm" onclick="humChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="hum-chart"></canvas></div>
+    </div>
+</div>
+
+<hr class="section-divider">
+
+<div class="section-header">
+    <span class="section-title">Configuration</span>
+</div>
+
+<div class="config-panel">
+    <div class="config-panel-header">Node Settings</div>
+    <div class="config-panel-body">
+        <div class="config-row">
+            <label>RZERO Calibration</label>
+            <input type="number" id="cfg-rzero" step="0.01" placeholder="76.63">
+            <button onclick="sendConfig('rzero')" class="primary">Update</button>
+        </div>
+        <div class="config-row">
+            <label>Read Interval (ms)</label>
+            <input type="number" id="cfg-interval" step="1000" min="2000" max="300000" placeholder="10000">
+            <button onclick="sendConfig('read_interval')" class="primary">Update</button>
+        </div>
+        <div class="config-row">
+            <label>Assign Node ID</label>
+            <input type="number" id="cfg-node-id" min="1" max="99" placeholder="1">
+            <button onclick="sendConfig('assign_id')" class="primary">Reassign</button>
+        </div>
+        <p id="config-status" class="config-status"></p>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NODE_ID = {{ node_id }};
+    let ppmChart, tempChart, humChart;
+
+    const zoomOptions = {
+        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "xy" },
+        pan:  { enabled: true, mode: "xy" }
+    };
+
+    const xAxis = {
+        type: "time",
+        time: { unit: "minute", displayFormats: { minute: "HH:mm" }, tooltipFormat: "HH:mm" },
+        ticks: { maxTicksLimit: 10, color: "#6b7280", font: { family: "'IBM Plex Mono'" } },
+        grid: { color: "#f0f1f3" }
+    };
+
+    const yAxis = (min, max) => ({
+        ticks: { precision: 1, color: "#6b7280", font: { family: "'IBM Plex Mono'" } },
+        grid: { color: "#f0f1f3" },
+        suggestedMin: min,
+        suggestedMax: max
+    });
+
+    const ppmScaleOptions  = { x: xAxis, y: yAxis(0, 1000) };
+    const tempScaleOptions = { x: xAxis, y: yAxis(15, 40)  };
+    const humScaleOptions  = { x: xAxis, y: yAxis(30, 80)  };
+
+    // ── Air quality helper ────────────────────────────────────
+
+    function getAirQuality(ppm) {
+        if (ppm <= 400)  return { label: "Excellent", color: "#16a34a", bg: "#dcfce7" };
+        if (ppm <= 600)  return { label: "Good",      color: "#65a30d", bg: "#ecfccb" };
+        if (ppm <= 1000) return { label: "Moderate",  color: "#d97706", bg: "#fef3c7" };
+        if (ppm <= 1500) return { label: "Poor",      color: "#ea580c", bg: "#ffedd5" };
+        return                  { label: "Hazardous", color: "#dc2626", bg: "#fee2e2" };
+    }
+
+    function updateAqBar(ppm) {
+        const aq  = getAirQuality(ppm);
+        const bar = document.getElementById("aq-live");
+        bar.style.background = aq.bg;
+        bar.style.color      = aq.color;
+        bar.innerHTML = `<span class="aq-dot" style="background:${aq.color}"></span>
+                         ${aq.label} — ${ppm.toFixed(0)} ppm`;
+    }
+
+    // ── Status helper ─────────────────────────────────────────
+
+    function setOnline(ppm) {
+        const s = document.getElementById("node-status");
+        s.textContent = "Online";
+        s.className   = "status-badge online";
+        document.getElementById("last-reading-p").textContent = "";
+        if (ppm !== undefined) updateAqBar(ppm);
+    }
+
+    function setOffline(node) {
+        const s = document.getElementById("node-status");
+        s.textContent = "Offline";
+        s.className   = "status-badge offline";
+        document.getElementById("live-ppm").textContent  = "—";
+        document.getElementById("live-temp").textContent = "—";
+        document.getElementById("live-hum").textContent  = "—";
+        document.getElementById("last-reading-p").textContent =
+            `Last seen: ${node.received_at} (${node.time_ago})`;
+        const bar = document.getElementById("aq-live");
+        bar.style.background = "#f0f1f3";
+        bar.style.color      = "#9ca3af";
+        bar.innerHTML = `<span class="aq-dot" style="background:#9ca3af"></span>No data`;
+    }
+
+    // ── Live updates ─────────────────────────────────────────
+
+    function onLiveUpdate(data) {
+        if (data.node !== NODE_ID) return;
+        document.getElementById("live-ppm").textContent  = data.ppm.toFixed(1);
+        document.getElementById("live-temp").textContent = data.temperature.toFixed(1) + "°";
+        document.getElementById("live-hum").textContent  = data.humidity.toFixed(1) + "%";
+        setOnline(data.ppm);
+    }
+
+    // ── Charts ────────────────────────────────────────────────
+
+    function initCharts() {
+        ppmChart = new Chart(document.getElementById("ppm-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "PPM", data: [],
+                borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions }, scales: ppmScaleOptions }
+        });
+        tempChart = new Chart(document.getElementById("temp-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "Temperature (°C)", data: [],
+                borderColor: "#ea580c", backgroundColor: "rgba(234,88,12,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions }, scales: tempScaleOptions }
+        });
+        humChart = new Chart(document.getElementById("hum-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "Humidity (%)", data: [],
+                borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions }, scales: humScaleOptions }
+        });
+    }
+
+    function updateCharts(data) {
+        if (data.length === 0) {
+            ppmChart.data.labels = []; ppmChart.data.datasets[0].data = [];
+            tempChart.data.labels = []; tempChart.data.datasets[0].data = [];
+            humChart.data.labels = []; humChart.data.datasets[0].data = [];
+            ppmChart.update(); tempChart.update(); humChart.update();
+            return;
+        }
+
+        const GAP_THRESHOLD_MS = 5 * 60 * 1000;
+        const labels = [], ppms = [], temps = [], hums = [];
+
+        for (let i = 0; i < data.length; i++) {
+            if (i > 0) {
+                const prev = new Date(data[i-1].received_at).getTime();
+                const curr = new Date(data[i].received_at).getTime();
+                if (curr - prev > GAP_THRESHOLD_MS) {
+                    labels.push(new Date(prev + (curr - prev) / 2).toISOString());
+                    ppms.push(null); temps.push(null); hums.push(null);
+                }
+            }
+            labels.push(data[i].received_at);
+            ppms.push(data[i].ppm);
+            temps.push(data[i].temperature);
+            hums.push(data[i].humidity);
+        }
+
+        ppmChart.data.labels = labels; ppmChart.data.datasets[0].data = ppms;
+        tempChart.data.labels = labels; tempChart.data.datasets[0].data = temps;
+        humChart.data.labels = labels; humChart.data.datasets[0].data = hums;
+        ppmChart.update(); tempChart.update(); humChart.update();
+    }
+
+    function setActiveButton(hours) {
+        ["1h","6h","24h","7d"].forEach(id => {
+            document.getElementById(`btn-${id}`).classList.remove("active");
+        });
+        if (hours === null) return;
+        const map = {1:"1h", 6:"6h", 24:"24h", 168:"7d"};
+        if (map[hours]) document.getElementById(`btn-${map[hours]}`).classList.add("active");
+    }
+
+    function loadHistory(hours) {
+        setActiveButton(hours);
+        fetch(`/api/node/${NODE_ID}/history?hours=${hours}`).then(r => r.json()).then(updateCharts);
+    }
+
+    function loadHistoryCustom() {
+        const start = document.getElementById("custom-start").value;
+        const end   = document.getElementById("custom-end").value;
+        if (!start || !end) { alert("Select both start and end times"); return; }
+        if (new Date(end) <= new Date(start)) { alert("End time must be after start time"); return; }
+        const fmt = dt => dt.replace("T", " ") + ":00";
+        setActiveButton(null);
+        fetch(`/api/node/${NODE_ID}/history/range?start=${encodeURIComponent(fmt(start))}&end=${encodeURIComponent(fmt(end))}`)
+            .then(r => r.json()).then(updateCharts);
+    }
+
+    // ── Config ────────────────────────────────────────────────
+
+    function sendConfig(key) {
+        const inputs = {
+            rzero:         document.getElementById("cfg-rzero").value,
+            read_interval: document.getElementById("cfg-interval").value,
+            assign_id:     document.getElementById("cfg-node-id").value
+        };
+        const value = inputs[key];
+        if (!value) { alert("Enter a value first"); return; }
+
+        const payload = {};
+        payload[key] = key === "rzero" ? parseFloat(value) : parseInt(value);
+
+        fetch(`/api/node/${NODE_ID}/config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            const s = document.getElementById("config-status");
+            s.style.display = "block";
+            if (data.status === "sent") {
+                s.textContent = "✓ Config sent successfully";
+                s.style.color = "#16a34a";
+            } else {
+                s.textContent = "✗ Failed: " + (data.error || "unknown error");
+                s.style.color = "#dc2626";
+            }
+            setTimeout(() => s.style.display = "none", 3000);
+        });
+    }
+
+    // ── Init ─────────────────────────────────────────────────
+
+    const now       = new Date();
+    const yesterday = new Date(now - 24 * 3600 * 1000);
+    const fmtDt     = d => d.toISOString().slice(0, 16);
+    document.getElementById("custom-start").value = fmtDt(yesterday);
+    document.getElementById("custom-end").value   = fmtDt(now);
+
+    fetch(`/api/nodes`)
+        .then(r => r.json())
+        .then(nodes => {
+            const node = nodes.find(n => n.node_id === NODE_ID);
+            if (node) {
+                if (node.online) {
+                    document.getElementById("live-ppm").textContent  = node.ppm.toFixed(1);
+                    document.getElementById("live-temp").textContent = node.temperature.toFixed(1) + "°";
+                    document.getElementById("live-hum").textContent  = node.humidity.toFixed(1) + "%";
+                    setOnline(node.ppm);
+                } else {
+                    setOffline(node);
+                }
+            }
+        });
+
+    initCharts();
+    loadHistory(24);
+
+    setInterval(() => {
+        fetch(`/api/nodes`)
+            .then(r => r.json())
+            .then(nodes => {
+                const node = nodes.find(n => n.node_id === NODE_ID);
+                if (node && !node.online) setOffline(node);
+            });
+    }, 30000);
+</script>
+{% endblock %}

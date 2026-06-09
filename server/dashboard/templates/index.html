@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="page-header">
+    <h1>System Overview</h1>
+    <p class="subtitle">Last updated: <span id="last-updated">—</span></p>
+</div>
+
+<div class="nodes-grid" id="nodes-grid">
+    <p class="last-updated">Loading nodes...</p>
+</div>
+
+<div class="aq-reference">
+    <div class="aq-reference-header">Air Quality Reference</div>
+    <div class="aq-reference-body">
+        <table class="aq-table">
+            <thead>
+                <tr>
+                    <th>Range</th>
+                    <th>Level</th>
+                    <th>Context</th>
+                    <th>Health Effects</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="aq-badge" style="background:#dcfce7;color:#16a34a">0–400 ppm</span></td>
+                    <td><strong style="color:#16a34a">Excellent</strong></td>
+                    <td>Fresh outdoor air</td>
+                    <td>None</td>
+                </tr>
+                <tr>
+                    <td><span class="aq-badge" style="background:#ecfccb;color:#65a30d">400–600 ppm</span></td>
+                    <td><strong style="color:#65a30d">Good</strong></td>
+                    <td>Normal indoor air</td>
+                    <td>None</td>
+                </tr>
+                <tr>
+                    <td><span class="aq-badge" style="background:#fef3c7;color:#d97706">600–1000 ppm</span></td>
+                    <td><strong style="color:#d97706">Moderate</strong></td>
+                    <td>Stuffy room, mild occupancy</td>
+                    <td>Mild fatigue possible</td>
+                </tr>
+                <tr>
+                    <td><span class="aq-badge" style="background:#ffedd5;color:#ea580c">1000–1500 ppm</span></td>
+                    <td><strong style="color:#ea580c">Poor</strong></td>
+                    <td>Crowded or poorly ventilated room</td>
+                    <td>Headache, drowsiness</td>
+                </tr>
+                <tr>
+                    <td><span class="aq-badge" style="background:#fee2e2;color:#dc2626">1500+ ppm</span></td>
+                    <td><strong style="color:#dc2626">Hazardous</strong></td>
+                    <td>Seriously poor air quality</td>
+                    <td>Impaired concentration, dizziness</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<hr class="section-divider">
+
+<div class="section-header">
+    <span class="section-title">System Averages</span>
+</div>
+
+<div class="time-selector">
+    <span class="time-selector-label">Range</span>
+    <button onclick="loadAverages(1)"   id="btn-1h">1h</button>
+    <button onclick="loadAverages(6)"   id="btn-6h">6h</button>
+    <button onclick="loadAverages(24)"  id="btn-24h" class="active">24h</button>
+    <button onclick="loadAverages(168)" id="btn-7d">7d</button>
+    <input type="datetime-local" id="custom-start">
+    <input type="datetime-local" id="custom-end">
+    <button onclick="loadAveragesCustom()" class="primary">Apply</button>
+</div>
+<p class="chart-hint">Scroll to zoom · Click and drag to pan</p>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">Average PPM (CO₂)</span>
+        <button class="btn-sm" onclick="avgPpmChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="avg-ppm-chart"></canvas></div>
+    </div>
+</div>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">Average Temperature</span>
+        <button class="btn-sm" onclick="avgTempChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="avg-temp-chart"></canvas></div>
+    </div>
+</div>
+
+<div class="chart-section">
+    <div class="chart-section-header">
+        <span class="chart-section-title">Average Humidity</span>
+        <button class="btn-sm" onclick="avgHumChart.resetZoom()">Reset Zoom</button>
+    </div>
+    <div class="chart-section-body">
+        <div class="chart-container"><canvas id="avg-hum-chart"></canvas></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let avgPpmChart, avgTempChart, avgHumChart;
+    let currentHours = 24;
+
+    const zoomOptions = {
+        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "xy" },
+        pan:  { enabled: true, mode: "xy" }
+    };
+
+    const xAxis = {
+        type: "time",
+        time: { unit: "minute", displayFormats: { minute: "HH:mm" }, tooltipFormat: "HH:mm" },
+        ticks: { maxTicksLimit: 10, color: "#6b7280", font: { family: "'IBM Plex Mono'" } },
+        grid: { color: "#f0f1f3" }
+    };
+
+    const yAxis = (min, max) => ({
+        ticks: { precision: 1, color: "#6b7280", font: { family: "'IBM Plex Mono'" } },
+        grid: { color: "#f0f1f3" },
+        suggestedMin: min,
+        suggestedMax: max
+    });
+
+    const ppmScaleOptions  = { x: xAxis, y: yAxis(0, 1000) };
+    const tempScaleOptions = { x: xAxis, y: yAxis(15, 40)  };
+    const humScaleOptions  = { x: xAxis, y: yAxis(30, 80)  };
+
+    // ── Air quality helper ────────────────────────────────────
+
+    function getAirQuality(ppm) {
+        if (ppm <= 400)  return { label: "Excellent", color: "#16a34a", bg: "#dcfce7" };
+        if (ppm <= 600)  return { label: "Good",      color: "#65a30d", bg: "#ecfccb" };
+        if (ppm <= 1000) return { label: "Moderate",  color: "#d97706", bg: "#fef3c7" };
+        if (ppm <= 1500) return { label: "Poor",      color: "#ea580c", bg: "#ffedd5" };
+        return                  { label: "Hazardous", color: "#dc2626", bg: "#fee2e2" };
+    }
+
+    // ── Node cards ──────────────────────────────────────────
+
+    function renderNodes(nodes) {
+        const grid = document.getElementById("nodes-grid");
+        if (nodes.length === 0) {
+            grid.innerHTML = "<p class='last-updated'>No nodes found.</p>";
+            return;
+        }
+        grid.innerHTML = nodes.map(node => {
+            const aq = node.online ? getAirQuality(node.ppm) : null;
+            return `
+            <div class="node-card" id="node-card-${node.node_id}">
+                <div class="node-card-header">
+                    <span class="node-card-title">Node ${node.node_id}</span>
+                    <span class="status-badge ${node.online ? 'online' : 'offline'}"
+                          id="status-${node.node_id}">
+                        ${node.online ? 'Online' : 'Offline'}
+                    </span>
+                </div>
+                <div class="node-card-body">
+                    <div class="aq-level-bar" id="aq-${node.node_id}"
+                         style="background:${node.online ? aq.bg : '#f0f1f3'};
+                                color:${node.online ? aq.color : '#9ca3af'}">
+                        ${node.online
+                            ? `<span class="aq-dot" style="background:${aq.color}"></span>
+                               ${aq.label} — ${node.ppm.toFixed(0)} ppm`
+                            : `<span class="aq-dot" style="background:#9ca3af"></span>No data`}
+                    </div>
+                    <div class="readings-grid">
+                        <div class="reading-item ppm">
+                            <div class="reading-value" id="ppm-${node.node_id}">
+                                ${node.online ? node.ppm.toFixed(1) : '—'}
+                            </div>
+                            <div class="reading-label">PPM</div>
+                        </div>
+                        <div class="reading-item temp">
+                            <div class="reading-value" id="temp-${node.node_id}">
+                                ${node.online ? node.temperature.toFixed(1) + '°' : '—'}
+                            </div>
+                            <div class="reading-label">Temp °C</div>
+                        </div>
+                        <div class="reading-item hum">
+                            <div class="reading-value" id="hum-${node.node_id}">
+                                ${node.online ? node.humidity.toFixed(1) + '%' : '—'}
+                            </div>
+                            <div class="reading-label">Humidity</div>
+                        </div>
+                    </div>
+                    <p class="last-reading-text" id="last-reading-${node.node_id}">
+                        ${!node.online ? `Last seen: ${node.received_at} (${node.time_ago})` : ''}
+                    </p>
+                    <a href="/node/${node.node_id}" class="view-details-btn">View Details →</a>
+                </div>
+            </div>`;
+        }).join("");
+    }
+
+    function loadNodes() {
+        fetch("/api/nodes")
+            .then(r => r.json())
+            .then(nodes => {
+                renderNodes(nodes);
+                document.getElementById("last-updated").textContent =
+                    new Date().toLocaleTimeString();
+            });
+    }
+
+    // ── Live updates ─────────────────────────────────────────
+
+    function onLiveUpdate(data) {
+        const id     = data.node;
+        const ppmEl  = document.getElementById(`ppm-${id}`);
+        const tempEl = document.getElementById(`temp-${id}`);
+        const humEl  = document.getElementById(`hum-${id}`);
+        const statEl = document.getElementById(`status-${id}`);
+        const lastEl = document.getElementById(`last-reading-${id}`);
+        const aqEl   = document.getElementById(`aq-${id}`);
+
+        if (ppmEl)  ppmEl.textContent  = data.ppm.toFixed(1);
+        if (tempEl) tempEl.textContent = data.temperature.toFixed(1) + "°";
+        if (humEl)  humEl.textContent  = data.humidity.toFixed(1) + "%";
+        if (statEl) { statEl.textContent = "Online"; statEl.className = "status-badge online"; }
+        if (lastEl) lastEl.textContent = "";
+        if (aqEl) {
+            const aq = getAirQuality(data.ppm);
+            aqEl.style.background = aq.bg;
+            aqEl.style.color      = aq.color;
+            aqEl.innerHTML = `<span class="aq-dot" style="background:${aq.color}"></span>
+                              ${aq.label} — ${data.ppm.toFixed(0)} ppm`;
+        }
+
+        document.getElementById("last-updated").textContent = new Date().toLocaleTimeString();
+    }
+
+    // ── Average charts ────────────────────────────────────────
+
+    function initCharts() {
+        avgPpmChart = new Chart(document.getElementById("avg-ppm-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "Average PPM (active nodes)", data: [],
+                borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions },
+                scales: ppmScaleOptions
+            }
+        });
+        avgTempChart = new Chart(document.getElementById("avg-temp-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "Average Temperature (°C)", data: [],
+                borderColor: "#ea580c", backgroundColor: "rgba(234,88,12,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions },
+                scales: tempScaleOptions
+            }
+        });
+        avgHumChart = new Chart(document.getElementById("avg-hum-chart"), {
+            type: "line",
+            data: { labels: [], datasets: [{
+                label: "Average Humidity (%)", data: [],
+                borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,0.05)",
+                tension: 0.3, fill: true, pointRadius: 2, spanGaps: false, borderWidth: 2
+            }]},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, zoom: zoomOptions },
+                scales: humScaleOptions
+            }
+        });
+    }
+
+    function updateCharts(data) {
+        if (data.length === 0) {
+            avgPpmChart.data.labels = []; avgPpmChart.data.datasets[0].data = [];
+            avgTempChart.data.labels = []; avgTempChart.data.datasets[0].data = [];
+            avgHumChart.data.labels = []; avgHumChart.data.datasets[0].data = [];
+            avgPpmChart.update(); avgTempChart.update(); avgHumChart.update();
+            return;
+        }
+
+        const GAP_THRESHOLD_MS = 5 * 60 * 1000;
+        const labels = [], ppms = [], temps = [], hums = [];
+
+        for (let i = 0; i < data.length; i++) {
+            if (i > 0) {
+                const prev = new Date(data[i-1].time).getTime();
+                const curr = new Date(data[i].time).getTime();
+                if (curr - prev > GAP_THRESHOLD_MS) {
+                    labels.push(new Date(prev + (curr - prev) / 2).toISOString());
+                    ppms.push(null); temps.push(null); hums.push(null);
+                }
+            }
+            labels.push(data[i].time);
+            ppms.push(data[i].avg_ppm);
+            temps.push(data[i].avg_temperature);
+            hums.push(data[i].avg_humidity);
+        }
+
+        avgPpmChart.data.labels = labels; avgPpmChart.data.datasets[0].data = ppms;
+        avgTempChart.data.labels = labels; avgTempChart.data.datasets[0].data = temps;
+        avgHumChart.data.labels = labels; avgHumChart.data.datasets[0].data = hums;
+        avgPpmChart.update(); avgTempChart.update(); avgHumChart.update();
+    }
+
+    function setActiveButton(hours) {
+        ["1h","6h","24h","7d"].forEach(id => {
+            document.getElementById(`btn-${id}`).classList.remove("active");
+        });
+        if (hours === null) return;
+        const map = {1:"1h", 6:"6h", 24:"24h", 168:"7d"};
+        if (map[hours]) document.getElementById(`btn-${map[hours]}`).classList.add("active");
+    }
+
+    function loadAverages(hours) {
+        currentHours = hours;
+        setActiveButton(hours);
+        fetch(`/api/averages?hours=${hours}`).then(r => r.json()).then(updateCharts);
+    }
+
+    function loadAveragesCustom() {
+        const start = document.getElementById("custom-start").value;
+        const end   = document.getElementById("custom-end").value;
+        if (!start || !end) { alert("Select both start and end times"); return; }
+        if (new Date(end) <= new Date(start)) { alert("End time must be after start time"); return; }
+        const fmt = dt => dt.replace("T", " ") + ":00";
+        setActiveButton(null);
+        fetch(`/api/averages/range?start=${encodeURIComponent(fmt(start))}&end=${encodeURIComponent(fmt(end))}`)
+            .then(r => r.json()).then(updateCharts);
+    }
+
+    const now       = new Date();
+    const yesterday = new Date(now - 24 * 3600 * 1000);
+    const fmtDt     = d => d.toISOString().slice(0, 16);
+    document.getElementById("custom-start").value = fmtDt(yesterday);
+    document.getElementById("custom-end").value   = fmtDt(now);
+
+    loadNodes();
+    initCharts();
+    loadAverages(24);
+    setInterval(loadNodes, 30000);
+</script>
+{% endblock %}
